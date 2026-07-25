@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'django.contrib.humanize',
     'rest_framework',
     'django_filters',
+    'anymail',
     'accounts',
     'transactions',
     'receipts',
@@ -183,6 +184,15 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'we
 # catch anything. A bounded timeout turns a hung connection into an ordinary,
 # catchable TimeoutError instead.
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
+
+# Many PaaS hosts block outbound SMTP (25/465/587) on free/starter plans to
+# deter spam — Render does. When a Resend key is present, send over
+# Resend's HTTPS API instead (port 443, never blocked) rather than raw
+# SMTP; local dev with no key set keeps using Gmail SMTP above unchanged.
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
+if RESEND_API_KEY:
+    EMAIL_BACKEND = 'anymail.backends.resend.EmailBackend'
+    ANYMAIL = {'RESEND_API_KEY': RESEND_API_KEY}
 
 # Receipt images are never persisted; keep in-memory upload handling tight
 # so small photos never spill to Django's own temp-file handler either.

@@ -2,6 +2,7 @@ import socket
 import time
 from smtplib import SMTPConnectError, SMTPException, SMTPServerDisconnected
 
+from anymail.exceptions import AnymailError
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as django_login
@@ -26,6 +27,9 @@ User = get_user_model()
 # SMTPRecipientsRefused — those are permanent failures (bad credentials, bad
 # address) that a retry can't fix, so they're left to the broader handler
 # below and reported immediately instead of wasting the user's time.
+# Only applies to the raw-SMTP path (local dev); the SendGrid/Anymail path
+# used in production raises AnymailError instead, which is always treated
+# as non-retryable below.
 RETRYABLE_EMAIL_ERRORS = (
     socket.gaierror,
     ConnectionError,
@@ -71,7 +75,7 @@ class RequestOtpView(APIView):
                 last_error = exc
                 if attempt < MAX_SEND_ATTEMPTS:
                     time.sleep(RETRY_DELAY_SECONDS)
-            except (SMTPException, OSError) as exc:
+            except (SMTPException, OSError, AnymailError) as exc:
                 return Response(
                     {"detail": f"Could not send the code: {exc}"},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
