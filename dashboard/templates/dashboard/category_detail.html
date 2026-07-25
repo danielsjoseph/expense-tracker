@@ -1,0 +1,155 @@
+{% extends "dashboard/base.html" %}
+{% load humanize %}
+{% block title %}{{ category }} - Expense Tracker{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center">
+    <h2 style="margin:0">{{ category }}</h2>
+    <a href="{% url 'dashboard' %}"><button type="button" class="secondary">Back to dashboard</button></a>
+  </div>
+  <div class="muted" style="margin-top:1rem">Total spend</div>
+  <div class="stat">{{ total|intcomma }}</div>
+</div>
+
+<div class="card">
+  <div class="muted" style="margin-bottom:0.5rem">Spend by category — click a slice to jump to it</div>
+  {% if category_chart_labels %}
+  <div style="max-width:280px; margin:0 auto">
+    <canvas id="categoryChart"></canvas>
+  </div>
+  {% else %}
+  <p class="muted">No spend yet in this range.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <form class="filters" method="get">
+    <input type="date" name="date_from" value="{{ date_from }}">
+    <input type="date" name="date_to" value="{{ date_to }}">
+    <button type="submit">Filter</button>
+    <a href="{% url 'category-detail' category=category %}"><button type="button" class="secondary">Clear</button></a>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for txn in transactions %}
+      <tr>
+        <td>{{ txn.date }}</td>
+        <td>{{ txn.amount|intcomma }} {{ txn.currency }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="2" class="muted">No {{ category }} transactions in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; flex-wrap:wrap; gap:0.5rem">
+    {% if show_all %}
+    <span class="muted">Showing all {{ transactions|length }} transaction(s)</span>
+    <a href="?{{ base_qs }}"><button type="button" class="secondary">Paginate (10 per page)</button></a>
+    {% else %}
+    <div>
+      {% if page_obj.has_previous %}
+      <a href="?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page_obj.previous_page_number }}"><button type="button" class="secondary">Previous</button></a>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a href="?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page_obj.next_page_number }}"><button type="button" class="secondary">Next</button></a>
+      {% endif %}
+    </div>
+    <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} ({{ page_obj.paginator.count }} total)</span>
+    <a href="?{{ base_qs }}{% if base_qs %}&{% endif %}all=1"><button type="button" class="secondary">See all transactions</button></a>
+    {% endif %}
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+{{ category_chart_labels|json_script:"category-chart-labels" }}
+{{ category_chart_totals|json_script:"category-chart-totals" }}
+{{ category|json_script:"active-category" }}
+{{ date_from|json_script:"active-date-from" }}
+{{ date_to|json_script:"active-date-to" }}
+<script>
+  const categoryChartLabels = JSON.parse(document.getElementById('category-chart-labels').textContent);
+  const categoryChartTotals = JSON.parse(document.getElementById('category-chart-totals').textContent);
+  const activeCategory = JSON.parse(document.getElementById('active-category').textContent);
+  const activeDateFrom = JSON.parse(document.getElementById('active-date-from').textContent);
+  const activeDateTo = JSON.parse(document.getElementById('active-date-to').textContent);
+
+  const CATEGORY_COLORS = {
+    Groceries: '#5b9dff',
+    Transport: '#f59e0b',
+    Dining: '#ef4444',
+    Utilities: '#a855f7',
+    Entertainment: '#22c55e',
+    Other: '#6b7280',
+  };
+
+  function categoryColor(label) {
+    return CATEGORY_COLORS[label] || '#6b7280';
+  }
+
+  function dimColor(hex) {
+    const value = parseInt(hex.replace('#', ''), 16);
+    const r = (value >> 16) & 255;
+    const g = (value >> 8) & 255;
+    const b = value & 255;
+    return `rgba(${r}, ${g}, ${b}, 0.25)`;
+  }
+
+  const categoryChartCanvas = document.getElementById('categoryChart');
+  if (categoryChartCanvas && categoryChartLabels.length) {
+    const isActive = (label) => label.toLowerCase() === activeCategory.toLowerCase();
+
+    new Chart(categoryChartCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: categoryChartLabels,
+        datasets: [{
+          data: categoryChartTotals,
+          backgroundColor: categoryChartLabels.map((label) => {
+            const base = categoryColor(label);
+            return isActive(label) ? base : dimColor(base);
+          }),
+          offset: categoryChartLabels.map((label) => (isActive(label) ? 18 : 0)),
+        }],
+      },
+      options: {
+        plugins: {
+          legend: {
+            position: 'bottom',
+            align: 'center',
+            labels: {
+              usePointStyle: true,
+              pointStyle: 'circle',
+              boxWidth: 8,
+              boxHeight: 8,
+              padding: 16,
+              font: { size: 13 },
+            },
+          },
+        },
+        onClick: (event, elements) => {
+          if (!elements.length) return;
+          const label = categoryChartLabels[elements[0].index];
+          if (isActive(label)) return; // already on this category's page
+          const target = new URLSearchParams();
+          if (activeDateFrom) target.set('date_from', activeDateFrom);
+          if (activeDateTo) target.set('date_to', activeDateTo);
+          const qs = target.toString();
+          window.location.href = `/dashboard/category/${encodeURIComponent(label)}/${qs ? '?' + qs : ''}`;
+        },
+        onHover: (event, elements) => {
+          event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+      },
+    });
+  }
+</script>
+{% endblock %}
