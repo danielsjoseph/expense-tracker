@@ -48,6 +48,13 @@ if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
     CSRF_TRUSTED_ORIGINS = [f"https://{RENDER_EXTERNAL_HOSTNAME}"]
 
+# The Vite dev server runs on its own origin (localhost:5173) and proxies
+# /api calls straight through to this Django server (see frontend's
+# vite.config.js) — but the browser's Origin header still reflects 5173,
+# so Django's CSRF check needs to trust it explicitly in dev.
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS = [*globals().get("CSRF_TRUSTED_ORIGINS", []), "http://localhost:5173"]
+
 
 # Application definition
 
@@ -147,6 +154,17 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# The built React app (frontend/npm run build) is served straight from its
+# own dist/ dir at the URL root via WhiteNoise, decoupled from Django's own
+# /static/ (admin, DRF browsable API) and its collectstatic/manifest
+# machinery — Vite already content-hashes its own filenames. index.html
+# itself is deliberately NOT auto-served here (WHITENOISE_INDEX_FILE stays
+# off); config.spa.spa_view serves it instead, since it also needs to set
+# the CSRF cookie for the SPA's fetch calls.
+_FRONTEND_DIST = BASE_DIR / 'frontend' / 'dist'
+if _FRONTEND_DIST.exists():
+    WHITENOISE_ROOT = _FRONTEND_DIST
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/models/fields/#default-auto-field

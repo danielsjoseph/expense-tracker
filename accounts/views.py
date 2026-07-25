@@ -8,9 +8,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.core.mail import send_mail
-from django.shortcuts import redirect, render
+from django.middleware.csrf import get_token
+from django.shortcuts import redirect
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -134,16 +134,26 @@ class VerifyOtpView(APIView):
         if created:
             seed_demo_transactions(user)
         django_login(request, user)
+        # Every mutating call from here on is against an authenticated
+        # session, which DRF's SessionAuthentication *does* CSRF-check —
+        # unlike this endpoint itself. Force the cookie to exist now rather
+        # than relying on the SPA shell's own ensure_csrf_cookie having run
+        # first (it won't have, e.g. under the Vite dev server).
+        get_token(request)
         return Response({"detail": "Logged in."})
 
 
-@ensure_csrf_cookie
-def login_page(request):
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-    return render(request, "accounts/login.html")
+class MeView(APIView):
+    """Tells the SPA whether the current session is authenticated, and as
+    whom — the client-side router uses this to decide whether to render
+    protected pages or bounce to /login. Default IsAuthenticated permission
+    means an anonymous request gets a plain 403 here, which the frontend
+    treats the same as "not logged in"."""
+
+    def get(self, request):
+        return Response({"email": request.user.email or request.user.username})
 
 
 def logout_view(request):
     django_logout(request)
-    return redirect("login")
+    return redirect("/login/")

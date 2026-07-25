@@ -7,12 +7,17 @@ fields you confirm ever get persisted.
 
 ## Stack
 
-- **Backend:** Django + Django REST Framework
+- **Backend:** Django + Django REST Framework — a pure JSON API (plus `/admin/`,
+  CSV export, and `/logout/`)
+- **Frontend:** React + Vite SPA ([frontend/](frontend/)), client-side routed
+  with React Router, charts via Chart.js/react-chartjs-2. Built with
+  `npm run build` and served by the same Django process via WhiteNoise — no
+  separate frontend host, no CORS.
 - **OCR:** pytesseract (Tesseract OCR engine) + OpenCV/Pillow preprocessing
 - **DB:** SQLite locally, Postgres in production (via `DATABASE_URL`)
-- **Frontend:** server-rendered Django templates + vanilla JS (fetch calls to the DRF API)
 - **Admin:** Django admin, registered as a free transaction browser/editor
-- **Auth:** passwordless email OTP login (no passwords stored at all) via Gmail SMTP
+- **Auth:** passwordless email OTP login (no passwords stored at all) — Gmail
+  SMTP locally, Resend's HTTPS API in production (see **Sending OTP email**)
 
 ## The no-image-storage constraint
 
@@ -46,48 +51,63 @@ This is a hard design constraint, not an optimization:
 ## Project layout
 
 ```
-config/          Django project settings/urls
+config/          Django project settings/urls, config/spa.py (SPA catch-all view)
 transactions/    Transaction model, DRF viewset, filters, admin
 receipts/        upload/extract API view + OCR pipeline
   ocr/           preprocessing.py, extractor.py, parser.py, categorize.py, pipeline.py
                  (plain Python — no Django imports — independently testable)
-dashboard/       server-rendered pages: public homepage, dashboard, Update Expenses, Update Income
-accounts/        passwordless email-OTP login (LoginOTP model, request/verify API, login page)
+dashboard/       dashboard/category-summary JSON API views + CSV export
+accounts/        passwordless email-OTP login (LoginOTP model, request/verify/me API)
+frontend/        React + Vite SPA — pages, charts, IndexedDB draft persistence
+  src/pages/     Home, Login, Dashboard, CategoryDetail, Expenses, Income
+  src/components/  Layout, ProtectedRoute, chart components, TransactionsTable
 ```
 
 ## Authentication
 
-The whole app is login-gated — every dashboard page and every API endpoint
-(except the OTP endpoints themselves) requires an authenticated session
-(`IsAuthenticated` is the DRF-wide default; pages use `@login_required`).
+Every data-bearing API endpoint (everything except the OTP endpoints
+themselves) requires an authenticated session — `IsAuthenticated` is the
+DRF-wide default. The SPA shell itself (the HTML page) is served to everyone,
+logged in or not; the React app calls `GET /api/auth/me/` on load to decide
+whether to render a protected page or redirect to `/login` client-side
+(`ProtectedRoute` in [frontend/src/components/ProtectedRoute.jsx](frontend/src/components/ProtectedRoute.jsx)).
 There are no passwords anywhere:
 
-1. Enter your email on `/login/`. `POST /api/auth/request-otp/` generates a
+1. Enter your email on `/login`. `POST /api/auth/request-otp/` generates a
    6-digit code, hashes it (Django's password hasher, never stored in plain
-   text) with a 10-minute expiry, and emails it **synchronously** via Gmail
-   SMTP — the request blocks until `send_mail()` returns, no task queue.
+   text) with a 10-minute expiry, and emails it **synchronously** — the
+   request blocks until `send_mail()` returns, no task queue. Capped at one
+   request per email per 60 seconds.
 2. Enter the code. `POST /api/auth/verify-otp/` checks it (max 5 attempts per
    code, single-use) and logs you in. The **first** successful verification
-   for a new email auto-creates a `User` for it — there's no separate signup
-   step.
+   for a new email auto-creates a `User` for it, seeded with 20 sample
+   transactions and a default ₦500,000 salary so the dashboard isn't empty —
+   there's no separate signup step.
 3. `Transaction` / `MonthlyIncome` / `ExtraIncome` are all scoped to
    `request.user`, so each account only ever sees its own data.
 
-### Setting up Gmail
+### Sending OTP email
 
-Gmail requires an **App Password** (not your normal password) for SMTP once
-2FA is on:
+Locally, Gmail SMTP works fine. In production, most PaaS free tiers (Render
+included) block outbound SMTP ports to deter spam, so OTP email would never
+send — the app instead switches to sending over **Resend's HTTPS API**
+(via `django-anymail`) whenever `RESEND_API_KEY` is set, since that isn't
+subject to the port block. Local dev with no key set keeps using Gmail SMTP.
 
-1. Enable 2-Step Verification on the Google account.
-2. Generate one at <https://myaccount.google.com/apppasswords>.
-3. In `.env`:
-   ```
-   EMAIL_HOST_USER=youraddress@gmail.com
-   EMAIL_HOST_PASSWORD=the16charapppassword
-   DEFAULT_FROM_EMAIL=youraddress@gmail.com
-   ```
+**Gmail SMTP (local dev):** requires an **App Password** (not your normal
+password) once 2FA is on — enable 2-Step Verification, generate one at
+<https://myaccount.google.com/apppasswords>, then in `.env`:
+```
+EMAIL_HOST_USER=youraddress@gmail.com
+EMAIL_HOST_PASSWORD=the16charapppassword
+DEFAULT_FROM_EMAIL=youraddress@gmail.com
+```
 
-Until that's set up, add `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend`
+**Resend (production):** sign up at <https://resend.com>, verify a sender
+(a domain, or use their `onboarding@resend.dev` default), create an API key,
+and set `RESEND_API_KEY` + `DEFAULT_FROM_EMAIL` on the host.
+
+Until either is set up, add `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend`
 to `.env` to print codes to the `runserver` terminal instead of emailing them.
 
 ## Core workflow
@@ -133,8 +153,11 @@ straight to `/dashboard/` instead of seeing the pitch again.
 | `/api/transactions/summary/` | GET | Aggregated totals — overall, by category, by month. |
 | `/api/income/current/` | GET, POST | Get/upsert the signed-in (or anonymous) user's recurring monthly salary. |
 | `/api/income/extra/` | GET, POST, DELETE | List/add/remove one-off extra income entries, always scoped to the current calendar month. |
-| `/api/auth/request-otp/` | POST | `{"email"}` → emails a 6-digit code. No auth required. |
+| `/api/auth/request-otp/` | POST | `{"email"}` → emails a 6-digit code. No auth required. Rate-limited to 1 per email per 60s. |
 | `/api/auth/verify-otp/` | POST | `{"email", "code"}` → logs in (creating the account on first success). No auth required. |
+| `/api/auth/me/` | GET | `{"email"}` if authenticated, 403 otherwise — the SPA's own login gate. |
+| `/api/dashboard/summary/` | GET | Filtered total, daily chart, income-vs-spent, category breakdown — everything the dashboard page needs in one call. |
+| `/api/dashboard/category/{category}/summary/` | GET | Same category breakdown chart data, plus that one category's total — for the category detail page. |
 
 Filter query params on `/api/transactions/`: `category` (exact match against
 the fixed category list), `date_from`, `date_to`, plus `ordering` (`date`,
@@ -170,12 +193,34 @@ python manage.py createsuperuser   # optional, for /admin/
 python manage.py runserver
 ```
 
-Visit `http://127.0.0.1:8000/` for the public landing page, `/login/` to log
-in (see **Authentication** above for Gmail setup), then `/dashboard/`,
-`/expenses/` to add a transaction (manually or from a receipt), `/income/`
-to set your salary or log extra income, `/admin/` for the built-in
-transaction browser (a separate, traditional username/password login — use
-`createsuperuser` for that one).
+### Frontend
+
+The React app lives in [frontend/](frontend/) and needs Node installed.
+
+```bash
+cd frontend
+npm install
+```
+
+Two ways to run it locally:
+
+- **Dev server (recommended while working on the frontend):**
+  `npm run dev` starts Vite on `http://localhost:5173`, proxying `/api`,
+  `/admin`, `/export`, and `/logout` straight through to Django on port 8000
+  (see `vite.config.js`) — run both servers side by side, then use the Vite
+  URL. Hot module reload works normally.
+- **Built, Django-served (matches production):** `npm run build` outputs to
+  `frontend/dist/`, which Django serves directly via WhiteNoise at the same
+  origin — just run `python manage.py runserver` and visit
+  `http://127.0.0.1:8000/`. Rebuild after every frontend change; there's no
+  watch mode in this path.
+
+Either way: `/` is the public landing page, `/login` to log in (see
+**Authentication** above), then `/dashboard`, `/expenses` to add a
+transaction (manually or from a receipt), `/income` to set your salary or
+log extra income, `/admin/` for the built-in transaction browser (a
+separate, traditional username/password login — use `createsuperuser` for
+that one).
 
 ## Environment variables
 
@@ -187,9 +232,11 @@ transaction browser (a separate, traditional username/password login — use
 | `DATABASE_URL` | e.g. Postgres connection string | falls back to local SQLite |
 | `TESSERACT_CMD` | path to the tesseract binary, if not on `PATH` | unset |
 | `EMAIL_BACKEND` | e.g. `...backends.console.EmailBackend` for dev | `...backends.smtp.EmailBackend` |
-| `EMAIL_HOST_USER` | Gmail address sending OTP codes | unset |
+| `EMAIL_HOST_USER` | Gmail address sending OTP codes (local dev) | unset |
 | `EMAIL_HOST_PASSWORD` | Gmail App Password (not your real password) | unset |
 | `DEFAULT_FROM_EMAIL` | From address for OTP emails | `EMAIL_HOST_USER` |
+| `RESEND_API_KEY` | Resend API key — when set, switches OTP email to Resend's HTTPS API (production) | unset |
+| `RENDER_EXTERNAL_HOSTNAME` | Set automatically by Render; trusted for `ALLOWED_HOSTS`/CSRF | unset |
 
 ## Tests
 
@@ -200,21 +247,40 @@ python manage.py test
 Covers: parser edge cases (subtotal/tax vs. total, thousands separators, OCR
 dropping decimal points, currency symbol detection), preprocessing output
 shape, category keyword guessing, the transactions API (CRUD, filtering,
-summary aggregation), monthly-salary and extra-income upsert/scoping
-behavior, the renamed routes, the no-image-persistence constraint, and the
-OTP login flow (code expiry, max attempts, single-use, auto-account-creation,
-and that every page/API endpoint actually redirects/rejects when logged out).
-Django's test runner automatically swaps `EMAIL_BACKEND` for an in-memory
-outbox, so the OTP tests never hit real Gmail.
+summary aggregation, pagination), monthly-salary and extra-income
+upsert/scoping behavior, the dashboard/category-summary JSON endpoints
+(per-user scoping, date/category filtering, 404 on unknown category), the
+no-image-persistence constraint, and the OTP login flow (code expiry, max
+attempts, single-use, rate-limit cooldown, auto-account-creation + demo
+seeding, and that every protected API endpoint actually rejects an anonymous
+caller). Django's test runner automatically swaps `EMAIL_BACKEND` for an
+in-memory outbox, so the OTP tests never hit real Gmail/Resend. This is the
+backend test suite (`python manage.py test`) only — there's no frontend test
+suite; the React app is verified by building it and exercising it in a
+browser.
 
-## Deploying (free tier)
+## Deploying
 
-- **App:** Railway or Render
-- **DB:** Railway/Supabase/Neon free Postgres — set `DATABASE_URL`
-- **Static files:** already wired through whitenoise
-  (`STATICFILES_STORAGE` + `collectstatic` at deploy time)
-- Set `DJANGO_DEBUG=False` and `DJANGO_ALLOWED_HOSTS` to your real domain in
-  production.
+Ships as a single Docker image (see [Dockerfile](Dockerfile)): a Node stage
+builds the React app, then a Python stage installs dependencies, copies the
+built `frontend/dist/`, runs `collectstatic`, and serves everything —
+API, admin, and the SPA shell — through one gunicorn process. No separate
+frontend host, no CORS config needed.
+
+Deployed here via **Render**, using [render.yaml](render.yaml) as a
+Blueprint (free Postgres + a Docker web service):
+
+- **DB:** `DATABASE_URL` env var (Render's free Postgres, or any Postgres host)
+- **Static files:** WhiteNoise serves both Django's own `/static/`
+  (admin/DRF browsable API, via `collectstatic`) and the React build's
+  assets (via `WHITENOISE_ROOT`, decoupled from Django's static machinery
+  since Vite already content-hashes its own filenames)
+- **Email:** set `RESEND_API_KEY` — see **Sending OTP email** above; Gmail
+  SMTP doesn't work on Render's free tier (outbound SMTP ports are blocked)
+- Render sets `RENDER_EXTERNAL_HOSTNAME` automatically; settings.py trusts it
+  for `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS` without further config
+- Set `DJANGO_DEBUG=False` and `DJANGO_SECRET_KEY` in production (render.yaml
+  generates the latter automatically for a Blueprint deploy)
 
 ## Known limitations
 

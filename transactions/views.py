@@ -4,6 +4,7 @@ from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,11 +18,21 @@ from .serializers import (
 )
 
 
+class TransactionPagination(PageNumberPagination):
+    """10/page by default; the frontend's "see all" toggle requests a large
+    page_size instead of a separate endpoint."""
+
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 10_000
+
+
 class TransactionViewSet(viewsets.ModelViewSet):
     serializer_class = TransactionSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = TransactionFilter
     ordering_fields = ["date", "amount", "category", "created_at"]
+    pagination_class = TransactionPagination
 
     def get_queryset(self):
         return Transaction.objects.filter(user=self.request.user)

@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from transactions.models import ExtraIncome, MonthlyIncome, Transaction
 
@@ -10,10 +11,19 @@ User = get_user_model()
 class AuthenticatedTestCase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="user@example.com", email="user@example.com")
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+
+class ExportCsvViewTests(TestCase):
+    """The CSV export stays a plain Django view (a file download, not
+    JSON), so it uses session auth via force_login rather than the DRF
+    APIClient's force_authenticate."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="user@example.com", email="user@example.com")
         self.client.force_login(self.user)
 
-
-class ExportCsvViewTests(AuthenticatedTestCase):
     def test_amounts_are_comma_formatted_and_total_row_is_appended(self):
         Transaction.objects.create(
             user=self.user, amount="1234.50", currency="NGN", date="2024-03-01", category="Groceries"
@@ -31,31 +41,25 @@ class ExportCsvViewTests(AuthenticatedTestCase):
         self.assertIn('"1,244.50"', content)
 
 
-class RenamedRoutesTests(AuthenticatedTestCase):
-    def test_expenses_page_replaces_upload_page(self):
-        response = self.client.get("/expenses/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Add an expense manually")
-
-        response = self.client.get("/upload/")
-        self.assertEqual(response.status_code, 404)
-
-    def test_income_page_shows_salary_and_extra_income_sections(self):
-        response = self.client.get("/income/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Update monthly salary")
-        self.assertContains(response, "Add extra income this month")
-
-    def test_dashboard_shows_combined_income(self):
+class DashboardSummaryViewTests(AuthenticatedTestCase):
+    def test_shows_combined_income(self):
         month = timezone.localdate().replace(day=1)
         MonthlyIncome.objects.create(user=self.user, month=month, amount="1000.00")
         ExtraIncome.objects.create(user=self.user, month=month, amount="200.00")
 
-        response = self.client.get("/dashboard/")
-        self.assertContains(response, "1,200.00")
+        response = self.client.get("/api/dashboard/summary/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(float(response.data["monthly_income"]), 1200.0)
+        self.assertEqual(float(response.data["base_income"]), 1000.0)
+        self.assertEqual(float(response.data["extra_income"]), 200.0)
+
+    def test_requires_authentication(self):
+        anon_client = APIClient()
+        response = anon_client.get("/api/dashboard/summary/")
+        self.assertEqual(response.status_code, 403)
 
 
-class DashboardPaginationTests(AuthenticatedTestCase):
+class TransactionPaginationTests(AuthenticatedTestCase):
     def setUp(self):
         super().setUp()
         for i in range(15):
@@ -67,25 +71,22 @@ class DashboardPaginationTests(AuthenticatedTestCase):
                 category="Groceries",
             )
 
-    def test_default_page_shows_ten_and_pagination_controls(self):
-        response = self.client.get("/dashboard/")
-        self.assertEqual(len(response.context["transactions"]), 10)
-        self.assertContains(response, "Page 1 of 2")
-        self.assertContains(response, "See all transactions")
-        self.assertContains(response, "Next")
-        self.assertNotContains(response, "Previous")
+    def test_default_page_shows_ten(self):
+        response = self.client.get("/api/transactions/")
+        self.assertEqual(len(response.data["results"]), 10)
+        self.assertEqual(response.data["count"], 15)
+        self.assertIsNotNone(response.data["next"])
+        self.assertIsNone(response.data["previous"])
 
     def test_second_page_shows_remaining_five(self):
-        response = self.client.get("/dashboard/", {"page": 2})
-        self.assertEqual(len(response.context["transactions"]), 5)
-        self.assertContains(response, "Previous")
-        self.assertNotContains(response, ">Next<")
+        response = self.client.get("/api/transactions/", {"page": 2})
+        self.assertEqual(len(response.data["results"]), 5)
+        self.assertIsNotNone(response.data["previous"])
 
-    def test_see_all_button_shows_every_transaction_on_one_page(self):
-        response = self.client.get("/dashboard/", {"all": "1"})
-        self.assertEqual(len(response.context["transactions"]), 15)
-        self.assertContains(response, "Showing all 15 transaction(s)")
-        self.assertContains(response, "Paginate (10 per page)")
+    def test_large_page_size_shows_every_transaction(self):
+        response = self.client.get("/api/transactions/", {"page_size": 1000})
+        self.assertEqual(len(response.data["results"]), 15)
+        self.assertIsNone(response.data["next"])
 
 
 class DashboardDailyChartTests(AuthenticatedTestCase):
@@ -96,21 +97,21 @@ class DashboardDailyChartTests(AuthenticatedTestCase):
             user=self.user, amount="25.00", currency="NGN", date=today, category="Groceries"
         )
 
-        response = self.client.get("/dashboard/")
+        response = self.client.get("/api/dashboard/summary/")
 
         expected_days = (today - month_start).days + 1
-        self.assertEqual(len(response.context["day_labels"]), expected_days)
-        self.assertEqual(len(response.context["day_totals"]), expected_days)
-        self.assertEqual(response.context["day_totals"][-1], 25.0)
+        self.assertEqual(len(response.data["day_labels"]), expected_days)
+        self.assertEqual(len(response.data["day_totals"]), expected_days)
+        self.assertEqual(response.data["day_totals"][-1], 25.0)
         # every day before today had no transactions, so it must be zero-filled
-        self.assertTrue(all(v == 0 for v in response.context["day_totals"][:-1]))
+        self.assertTrue(all(v == 0 for v in response.data["day_totals"][:-1]))
 
     def test_ignores_transactions_outside_current_month(self):
         Transaction.objects.create(
             user=self.user, amount="999.00", currency="NGN", date="2020-01-01", category="Groceries"
         )
-        response = self.client.get("/dashboard/")
-        self.assertEqual(sum(response.context["day_totals"]), 0)
+        response = self.client.get("/api/dashboard/summary/")
+        self.assertEqual(sum(response.data["day_totals"]), 0)
 
 
 class CategoryBreakdownChartTests(AuthenticatedTestCase):
@@ -125,37 +126,30 @@ class CategoryBreakdownChartTests(AuthenticatedTestCase):
 
     def test_chart_includes_all_categories_regardless_of_active_category_filter(self):
         # This is the whole point of the click-to-filter chart: filtering the
-        # table to one category must not collapse the chart to a single slice,
-        # or you'd lose the context you clicked it for.
-        response = self.client.get("/dashboard/", {"category": "Transport"})
+        # table to one category must not collapse the chart to a single
+        # slice, or you'd lose the context you clicked it for.
+        response = self.client.get("/api/dashboard/summary/", {"category": "Transport"})
 
-        labels = response.context["category_chart_labels"]
-        totals = response.context["category_chart_totals"]
+        labels = response.data["category_chart_labels"]
+        totals = response.data["category_chart_totals"]
         self.assertIn("Groceries", labels)
         self.assertIn("Transport", labels)
         self.assertEqual(totals[labels.index("Groceries")], 30.0)
         self.assertEqual(totals[labels.index("Transport")], 20.0)
 
-        # but the transaction table itself IS filtered
-        self.assertEqual(len(response.context["transactions"]), 1)
+        # but the transaction list itself IS filtered
+        table_response = self.client.get("/api/transactions/", {"category": "Transport"})
+        self.assertEqual(table_response.data["count"], 1)
 
     def test_chart_respects_date_range_filter(self):
-        response = self.client.get("/dashboard/", {"date_from": "2024-03-02"})
+        response = self.client.get("/api/dashboard/summary/", {"date_from": "2024-03-02"})
 
-        labels = response.context["category_chart_labels"]
+        labels = response.data["category_chart_labels"]
         self.assertNotIn("Groceries", labels)
         self.assertIn("Transport", labels)
 
-    def test_clear_category_qs_drops_category_but_keeps_date_filters(self):
-        response = self.client.get(
-            "/dashboard/", {"category": "Transport", "date_from": "2024-03-01"}
-        )
-        clear_qs = response.context["clear_category_qs"]
-        self.assertNotIn("category", clear_qs)
-        self.assertIn("date_from", clear_qs)
 
-
-class CategoryDetailPageTests(AuthenticatedTestCase):
+class CategoryDetailSummaryViewTests(AuthenticatedTestCase):
     def setUp(self):
         super().setUp()
         Transaction.objects.create(
@@ -168,22 +162,20 @@ class CategoryDetailPageTests(AuthenticatedTestCase):
             user=self.user, amount="20.00", currency="NGN", date="2024-03-02", category="Transport"
         )
 
-    def test_shows_only_that_categorys_transactions_and_total(self):
-        response = self.client.get("/dashboard/category/Groceries/")
+    def test_shows_only_that_categorys_total(self):
+        response = self.client.get("/api/dashboard/category/Groceries/summary/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["transactions"]), 2)
-        self.assertEqual(float(response.context["total"]), 45.0)
-        self.assertContains(response, "Groceries")
-        self.assertNotContains(response, "20.00")  # the Transport row
+        self.assertEqual(float(response.data["total"]), 45.0)
+        self.assertEqual(response.data["category"], "Groceries")
 
     def test_unknown_category_404s(self):
-        response = self.client.get("/dashboard/category/NotARealCategory/")
+        response = self.client.get("/api/dashboard/category/NotARealCategory/summary/")
         self.assertEqual(response.status_code, 404)
 
     def test_chart_includes_every_category_not_just_this_one(self):
-        response = self.client.get("/dashboard/category/Groceries/")
-        labels = response.context["category_chart_labels"]
-        totals = response.context["category_chart_totals"]
+        response = self.client.get("/api/dashboard/category/Groceries/summary/")
+        labels = response.data["category_chart_labels"]
+        totals = response.data["category_chart_totals"]
         self.assertIn("Groceries", labels)
         self.assertIn("Transport", labels)
         self.assertEqual(totals[labels.index("Groceries")], 45.0)
@@ -191,42 +183,48 @@ class CategoryDetailPageTests(AuthenticatedTestCase):
 
     def test_respects_date_range_query_params(self):
         response = self.client.get(
-            "/dashboard/category/Groceries/", {"date_from": "2024-03-10"}
+            "/api/dashboard/category/Groceries/summary/", {"date_from": "2024-03-10"}
         )
-        self.assertEqual(len(response.context["transactions"]), 1)
-        self.assertEqual(float(response.context["total"]), 15.0)
+        self.assertEqual(float(response.data["total"]), 15.0)
 
-    def test_only_shows_own_transactions(self):
+        table_response = self.client.get(
+            "/api/transactions/", {"category": "Groceries", "date_from": "2024-03-10"}
+        )
+        self.assertEqual(table_response.data["count"], 1)
+
+    def test_only_totals_own_transactions(self):
         other_user = User.objects.create_user(username="other@example.com")
         Transaction.objects.create(
             user=other_user, amount="999.00", currency="NGN", date="2024-03-01", category="Groceries"
         )
-        response = self.client.get("/dashboard/category/Groceries/")
-        self.assertEqual(len(response.context["transactions"]), 2)  # not 3
+        response = self.client.get("/api/dashboard/category/Groceries/summary/")
+        self.assertEqual(float(response.data["total"]), 45.0)  # not 1044.00
 
-    def test_requires_login(self):
-        self.client.logout()
-        response = self.client.get("/dashboard/category/Groceries/")
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/login/", response.url)
-
-
-class LoginGateTests(TestCase):
-    def test_anonymous_visitor_redirected_to_login(self):
-        for url in ["/dashboard/", "/expenses/", "/income/"]:
-            response = self.client.get(url)
-            self.assertEqual(response.status_code, 302)
-            self.assertIn("/login/", response.url)
+    def test_requires_authentication(self):
+        anon_client = APIClient()
+        response = anon_client.get("/api/dashboard/category/Groceries/summary/")
+        self.assertEqual(response.status_code, 403)
 
 
-class HomePageTests(TestCase):
-    def test_public_homepage_is_accessible_when_logged_out(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Log in to get started")
+class SpaShellTests(TestCase):
+    """Django no longer gates page routes itself — the SPA shell is the same
+    static HTML for everyone, and it's client-side (React Router + the
+    /api/auth/me/ check) that decides what to render. These just confirm
+    the catch-all route exists and never redirects, for both anonymous and
+    authenticated visitors, regardless of whether the frontend has been
+    built in this environment (a fresh checkout without `npm run build` yet
+    gets a 501 placeholder rather than a crash)."""
 
-    def test_logged_in_visitor_is_redirected_to_dashboard(self):
+    def _assert_serves_shell_without_redirect(self, path):
+        response = self.client.get(path)
+        self.assertIn(response.status_code, (200, 501))
+
+    def test_public_and_app_routes_serve_the_shell_when_logged_out(self):
+        for path in ["/", "/login/", "/dashboard/", "/expenses/", "/income/"]:
+            self._assert_serves_shell_without_redirect(path)
+
+    def test_app_routes_serve_the_shell_when_logged_in(self):
         user = User.objects.create_user(username="user@example.com")
         self.client.force_login(user)
-        response = self.client.get("/")
-        self.assertRedirects(response, "/dashboard/")
+        for path in ["/", "/dashboard/", "/expenses/", "/income/"]:
+            self._assert_serves_shell_without_redirect(path)

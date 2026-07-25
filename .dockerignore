@@ -6,3 +6,5 @@ staticfiles/
 .env
 *.log
 .git/
+frontend/node_modules/
+frontend/dist/

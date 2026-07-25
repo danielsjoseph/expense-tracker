@@ -161,8 +161,9 @@ class VerifyOtpViewTests(TestCase):
         self.assertEqual(User.objects.filter(username="new@example.com").count(), 1)
 
         # session is now authenticated
-        dashboard_response = self.client.get("/dashboard/")
-        self.assertEqual(dashboard_response.status_code, 200)
+        me_response = self.client.get("/api/auth/me/")
+        self.assertEqual(me_response.status_code, 200)
+        self.assertEqual(me_response.json()["email"], "new@example.com")
 
     def test_existing_user_is_not_duplicated(self):
         User.objects.create_user(username="existing@example.com", email="existing@example.com")
@@ -224,17 +225,22 @@ class VerifyOtpViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
 
-class LoginPageTests(TestCase):
-    def test_renders_for_anonymous_visitor(self):
-        response = self.client.get("/login/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Send code")
+class MeViewTests(TestCase):
+    """The SPA's own login gate: it calls /api/auth/me/ to decide whether
+    to render protected pages or bounce to /login, since Django itself no
+    longer redirects page routes (the shell is the same static HTML for
+    everyone)."""
 
-    def test_redirects_to_dashboard_if_already_authenticated(self):
-        user = User.objects.create_user(username="user@example.com")
+    def test_returns_email_when_authenticated(self):
+        user = User.objects.create_user(username="user@example.com", email="user@example.com")
         self.client.force_login(user)
-        response = self.client.get("/login/")
-        self.assertRedirects(response, "/dashboard/")
+        response = self.client.get("/api/auth/me/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email"], "user@example.com")
+
+    def test_rejected_when_anonymous(self):
+        response = self.client.get("/api/auth/me/")
+        self.assertEqual(response.status_code, 403)
 
 
 class LogoutViewTests(TestCase):
@@ -243,8 +249,12 @@ class LogoutViewTests(TestCase):
         self.client.force_login(user)
 
         response = self.client.get("/logout/")
-        self.assertRedirects(response, "/login/")
+        # fetch_redirect_response=False: whether /login/ itself renders
+        # (200) or falls back to the "frontend not built" placeholder (501)
+        # depends on whether `npm run build` has run in this environment —
+        # not what this test is checking.
+        self.assertRedirects(response, "/login/", fetch_redirect_response=False)
 
-        # session is gone — protected page now redirects to login
-        dashboard_response = self.client.get("/dashboard/")
-        self.assertEqual(dashboard_response.status_code, 302)
+        # session is gone — an authenticated-only API call now rejects it
+        me_response = self.client.get("/api/auth/me/")
+        self.assertEqual(me_response.status_code, 403)

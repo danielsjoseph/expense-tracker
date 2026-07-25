@@ -3,18 +3,11 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
-from django.core.paginator import Paginator
 from django.db.models import Sum
-from django.http import Http404, HttpResponse
-from django.shortcuts import redirect, render
+from django.http import HttpResponse
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
 
-from receipts.ocr.categorize import CATEGORIES
-from receipts.ocr.parser import CURRENCIES
 from transactions.models import ExtraIncome, MonthlyIncome, Transaction
-
-TRANSACTIONS_PER_PAGE = 10
 
 
 def _round2(value):
@@ -126,148 +119,6 @@ def _income_vs_spent_breakdown(income, spent):
         labels.append("Over budget")
         values.append(overspent)
     return labels, values
-
-
-def home_view(request):
-    """Public marketing/landing page. Logged-in visitors skip straight to
-    the actual dashboard instead of seeing the pitch every time."""
-    if request.user.is_authenticated:
-        return redirect("dashboard")
-    return render(request, "dashboard/home.html")
-
-
-@login_required
-def dashboard_view(request):
-    queryset = _filtered_queryset(request)
-
-    total = _round2(queryset.aggregate(total=Sum("amount"))["total"] or 0)
-    day_labels, day_totals = _daily_spend_this_month(request)
-
-    month_start = timezone.localdate().replace(day=1)
-    this_month_spent = _round2(
-        Transaction.objects.filter(user=request.user, date__gte=month_start).aggregate(
-            total=Sum("amount")
-        )["total"]
-        or 0
-    )
-    base_income = _base_income(request)
-    extra_income = _extra_income_total(request)
-    total_income = base_income + extra_income
-    pie_labels, pie_totals = _income_vs_spent_breakdown(total_income, this_month_spent)
-    category_labels, category_totals = _category_breakdown(request)
-
-    show_all = request.GET.get("all") == "1"
-    if show_all:
-        page_obj = None
-        transactions_page = queryset
-    else:
-        paginator = Paginator(queryset, TRANSACTIONS_PER_PAGE)
-        page_obj = paginator.get_page(request.GET.get("page"))
-        transactions_page = page_obj
-
-    base_qs = request.GET.copy()
-    base_qs.pop("page", None)
-    base_qs.pop("all", None)
-
-    clear_category_qs = request.GET.copy()
-    clear_category_qs.pop("category", None)
-    clear_category_qs.pop("page", None)
-    clear_category_qs.pop("all", None)
-
-    context = {
-        "transactions": transactions_page,
-        "page_obj": page_obj,
-        "show_all": show_all,
-        "base_qs": base_qs.urlencode(),
-        "clear_category_qs": clear_category_qs.urlencode(),
-        "total": total,
-        "day_labels": day_labels,
-        "day_totals": day_totals,
-        "income_pie_labels": pie_labels,
-        "income_pie_totals": pie_totals,
-        "category_chart_labels": category_labels,
-        "category_chart_totals": category_totals,
-        "filters": {
-            "category": request.GET.get("category", ""),
-            "date_from": request.GET.get("date_from", ""),
-            "date_to": request.GET.get("date_to", ""),
-        },
-        "categories": CATEGORIES,
-        "monthly_income": total_income,
-        "base_income": base_income,
-        "extra_income": extra_income,
-        "month_spent": this_month_spent,
-        "month_remaining": total_income - this_month_spent,
-    }
-    return render(request, "dashboard/index.html", context)
-
-
-@login_required
-def category_detail_view(request, category):
-    """The breakdown a clicked chart slice leads to — a dedicated page, not
-    a filtered view of the dashboard itself."""
-    if category not in CATEGORIES:
-        raise Http404("Unknown category")
-
-    queryset = Transaction.objects.filter(user=request.user, category=category)
-    date_from = request.GET.get("date_from")
-    date_to = request.GET.get("date_to")
-    if date_from:
-        queryset = queryset.filter(date__gte=date_from)
-    if date_to:
-        queryset = queryset.filter(date__lte=date_to)
-
-    total = _round2(queryset.aggregate(total=Sum("amount"))["total"] or 0)
-    category_labels, category_totals = _category_breakdown(request)
-
-    show_all = request.GET.get("all") == "1"
-    if show_all:
-        page_obj = None
-        transactions_page = queryset
-    else:
-        paginator = Paginator(queryset, TRANSACTIONS_PER_PAGE)
-        page_obj = paginator.get_page(request.GET.get("page"))
-        transactions_page = page_obj
-
-    base_qs = request.GET.copy()
-    base_qs.pop("page", None)
-    base_qs.pop("all", None)
-
-    context = {
-        "category": category,
-        "transactions": transactions_page,
-        "page_obj": page_obj,
-        "show_all": show_all,
-        "base_qs": base_qs.urlencode(),
-        "total": total,
-        "date_from": date_from or "",
-        "date_to": date_to or "",
-        "category_chart_labels": category_labels,
-        "category_chart_totals": category_totals,
-    }
-    return render(request, "dashboard/category_detail.html", context)
-
-
-@login_required
-@ensure_csrf_cookie
-def expenses_view(request):
-    return render(
-        request, "dashboard/expenses.html", {"categories": CATEGORIES, "currencies": CURRENCIES}
-    )
-
-
-@login_required
-@ensure_csrf_cookie
-def income_view(request):
-    return render(
-        request,
-        "dashboard/income.html",
-        {
-            "base_income": _base_income(request),
-            "extra_income_total": _extra_income_total(request),
-            "currencies": CURRENCIES,
-        },
-    )
 
 
 @login_required
