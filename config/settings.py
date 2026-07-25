@@ -40,6 +40,14 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# Render assigns each service a hostname at deploy time and exposes it via
+# this env var — trust it automatically instead of requiring it to be
+# hardcoded into DJANGO_ALLOWED_HOSTS.
+RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    CSRF_TRUSTED_ORIGINS = [f"https://{RENDER_EXTERNAL_HOSTNAME}"]
+
 
 # Application definition
 
