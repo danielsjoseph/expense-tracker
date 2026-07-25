@@ -11,7 +11,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import MAX_ATTEMPTS, LoginOTP
-from accounts.views import MAX_SEND_ATTEMPTS
+from accounts.views import MAX_SEND_ATTEMPTS, OTP_RESEND_COOLDOWN_SECONDS
 from transactions.demo_seed import DEFAULT_SALARY, DEMO_TRANSACTION_COUNT
 from transactions.models import MonthlyIncome, Transaction
 
@@ -74,6 +74,29 @@ class RequestOtpViewTests(TestCase):
         # override that, since it's part of the login mechanism itself.
         response = self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
         self.assertNotEqual(response.status_code, 403)
+
+    def test_second_request_within_cooldown_is_rejected(self):
+        first = self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(len(mail.outbox), 1)  # no second email sent
+
+    def test_cooldown_is_scoped_per_email(self):
+        self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
+        response = self.client.post("/api/auth/request-otp/", {"email": "other@example.com"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_request_allowed_again_after_cooldown_elapses(self):
+        self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
+        otp = LoginOTP.objects.get(email__iexact="user@example.com")
+        otp.created_at = timezone.now() - timedelta(seconds=OTP_RESEND_COOLDOWN_SECONDS + 1)
+        otp.save(update_fields=["created_at"])
+
+        response = self.client.post("/api/auth/request-otp/", {"email": "user@example.com"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
 
 
 class RequestOtpRetryTests(TestCase):

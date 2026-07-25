@@ -9,6 +9,7 @@ from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.core.mail import send_mail
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -40,6 +41,11 @@ RETRYABLE_EMAIL_ERRORS = (
 MAX_SEND_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 1.5
 
+# Prevents both abuse (repeatedly emailing an address that isn't yours) and
+# accidentally burning through a low daily sending quota (e.g. Resend's free
+# tier) via a runaway "resend" button.
+OTP_RESEND_COOLDOWN_SECONDS = 60
+
 
 class RequestOtpView(APIView):
     """Generates a login code and emails it — synchronously, in this same
@@ -52,6 +58,16 @@ class RequestOtpView(APIView):
         serializer = RequestOtpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].lower()
+
+        last_otp = LoginOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+        if last_otp:
+            elapsed = (timezone.now() - last_otp.created_at).total_seconds()
+            if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+                wait_seconds = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed) + 1
+                return Response(
+                    {"detail": f"Please wait {wait_seconds}s before requesting another code."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
 
         _otp, code = LoginOTP.issue(email)
         message = (
