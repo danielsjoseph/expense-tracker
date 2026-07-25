@@ -171,11 +171,18 @@ EMAIL_BACKEND = os.environ.get(
     'EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend'
 )
 EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False') == 'True'
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'webmaster@localhost')
+# Without this, a stalled TCP connect() blocks forever — on Render that meant
+# gunicorn's own worker timeout killed the process with an uncaught
+# SystemExit before our retry logic in RequestOtpView ever got a chance to
+# catch anything. A bounded timeout turns a hung connection into an ordinary,
+# catchable TimeoutError instead.
+EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
 
 # Receipt images are never persisted; keep in-memory upload handling tight
 # so small photos never spill to Django's own temp-file handler either.
