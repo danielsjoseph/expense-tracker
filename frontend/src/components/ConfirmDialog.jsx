@@ -1,8 +1,15 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+// Must match the CSS transition-duration on .dialog-backdrop/.dialog-card —
+// the DOM node stays mounted this long after close() so the exit
+// transition (reverse of the entrance) actually gets to play instead of
+// the modal just vanishing.
+const TRANSITION_MS = 180;
 
 /** A small in-app confirmation modal, styled to match the rest of the app
  * (unlike window.confirm(), which is the browser's own unstyled dialog).
- * Closes on Escape or a backdrop click, same as clicking Cancel. */
+ * Fades/scales in and out, and closes on Escape or a backdrop click, same
+ * as clicking Cancel. */
 export default function ConfirmDialog({
   open,
   title = 'Are you sure?',
@@ -13,24 +20,39 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }) {
+  const [mounted, setMounted] = useState(open);
+  const [visible, setVisible] = useState(false);
   const confirmRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (open) {
+      setMounted(true);
+      // Mounting and marking it visible in the same tick wouldn't transition
+      // (the browser needs a frame with the "before" state painted first).
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    setVisible(false);
+    const timeout = setTimeout(() => setMounted(false), TRANSITION_MS);
+    return () => clearTimeout(timeout);
+  }, [open]);
+
+  useEffect(() => {
+    if (!visible) return undefined;
     confirmRef.current?.focus();
     function handleKeyDown(event) {
       if (event.key === 'Escape') onCancel();
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [open, onCancel]);
+  }, [visible, onCancel]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   return (
-    <div className="dialog-backdrop" onClick={onCancel}>
+    <div className={`dialog-backdrop ${visible ? 'visible' : ''}`} onClick={onCancel}>
       <div
-        className="dialog-card"
+        className={`dialog-card ${visible ? 'visible' : ''}`}
         role="alertdialog"
         aria-modal="true"
         aria-label={title}

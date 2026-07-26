@@ -145,7 +145,8 @@ th, td {
 }
 th { color: var(--muted); font-weight: 600; }
 .clickable-row { cursor: pointer; }
-.clickable-row:hover td { background: var(--bg); }
+.transactions-table tbody tr:nth-child(even) td { background: var(--bg); }
+.transactions-table .clickable-row:hover td { background: var(--border); }
 input, select, button {
   font: inherit;
   padding: 0.45rem 0.6rem;
@@ -169,13 +170,15 @@ button.danger-solid { background: #ef4444; color: white; border: none; }
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
   z-index: 1000;
+  transition: background-color 0.18s ease;
 }
+.dialog-backdrop.visible { background: rgba(0, 0, 0, 0.5); }
 .dialog-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -184,7 +187,11 @@ button.danger-solid { background: #ef4444; color: white; border: none; }
   width: 100%;
   max-width: 400px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: scale(0.95) translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
+.dialog-card.visible { opacity: 1; transform: scale(1) translateY(0); }
 .muted { color: var(--muted); font-size: 0.85rem; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
 .stat { font-size: 1.6rem; font-weight: 700; }

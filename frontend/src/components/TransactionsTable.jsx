@@ -54,7 +54,7 @@ export default function TransactionsTable({ filters, showCategory = true }) {
 
   return (
     <>
-      <table>
+      <table className="transactions-table">
         <thead>
           <tr>
             <th>Date</th>
