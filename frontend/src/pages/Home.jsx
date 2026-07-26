@@ -34,18 +34,18 @@ export default function Home() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>📷 Upload a receipt, get a transaction</h3>
           <p className="muted">
-            Select one or more receipt photos. Each one is preprocessed (grayscale, denoise,
-            deskew) and run through Tesseract OCR to pull out the date, amount, currency, and a
-            guessed category — reviewed side-by-side with the actual image before anything saves.
+            Select one or more receipt photos. Each one runs through Tesseract OCR right in
+            your browser to pull out the date, amount, currency, and a guessed category —
+            reviewed side-by-side with the actual image before anything saves.
           </p>
         </div>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>🔒 Your photos are never stored</h3>
+          <h3 style={{ marginTop: 0 }}>🔒 Your photos never leave your device</h3>
           <p className="muted">
-            Images are processed entirely in memory — never written to disk, a database, or any
-            file field. Only the structured numbers you confirm get saved. There's no way to
-            retrieve the original photo later, because it was never kept.
+            OCR runs entirely client-side — the image is never uploaded anywhere, not even
+            temporarily. Only the structured numbers you confirm get sent to the server. There's
+            no way to retrieve the original photo later, because it never left your browser.
           </p>
         </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 import ReceiptRowCard from '../components/ReceiptRowCard';
 import { CATEGORIES, CURRENCIES } from '../lib/constants';
+import { extractTransactionFields, terminateOcrWorker } from '../lib/ocr/pipeline';
 import { RowStore } from '../lib/rowStore';
 
 function todayIso() {
@@ -43,6 +44,9 @@ export default function Expenses() {
     });
   }, []);
 
+  // Release the OCR worker (and its WASM memory) once this page is left.
+  useEffect(() => () => terminateOcrWorker(), []);
+
   function flashSuccess(setStatus, text, onExpire) {
     const token = ++manualStatusToken.current;
     setStatus({ text, tone: 'success' });
@@ -81,42 +85,54 @@ export default function Expenses() {
       return;
     }
 
-    const formData = new FormData();
-    files.forEach((file) => formData.append('images', file));
-
-    setExtractStatus(`Extracting ${files.length} receipt(s)...`);
     setExtracting(true);
+    // A fresh extraction replaces whatever unsaved batch was showing.
+    await RowStore.clear();
+    const newRows = [];
+    setRows([]);
+    setRowStatuses({});
 
-    try {
-      const res = await apiFetch('/api/extract/', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) {
-        setExtractStatus(data.detail || 'Extraction failed.');
-        return;
-      }
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      setExtractStatus(`Extracting receipt ${index + 1} of ${files.length} (running in your browser)...`);
 
-      // A fresh extraction replaces whatever unsaved batch was showing.
-      await RowStore.clear();
-      const newRows = data.results.map((result, index) => ({
+      const base = {
         id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-        filename: result.filename || `Receipt ${index + 1}`,
-        date: result.date || todayIso(),
-        amount: result.amount ?? '',
-        currency: 'NGN',
-        category: result.category || 'Other',
-        raw_ocr_text: result.raw_ocr_text || '',
-        error: result.error || '',
-        imageBlob: files[index],
-      }));
-      newRows.forEach((record) => RowStore.put(record));
-      setRows(newRows);
-      setRowStatuses({});
-      setExtractStatus(`Extracted ${data.results.length} receipt(s) — review and confirm below.`);
-    } catch {
-      setExtractStatus('Could not reach the server.');
-    } finally {
-      setExtracting(false);
+        filename: file.name || `Receipt ${index + 1}`,
+        imageBlob: file,
+      };
+      let record;
+      try {
+        // Runs entirely client-side — the image itself is never uploaded.
+        const result = await extractTransactionFields(file);
+        record = {
+          ...base,
+          date: result.date || todayIso(),
+          amount: result.amount ?? '',
+          currency: 'NGN',
+          category: result.category || 'Other',
+          raw_ocr_text: result.raw_ocr_text || '',
+          error: '',
+        };
+      } catch (err) {
+        // A single unreadable image shouldn't sink the rest of the batch.
+        record = {
+          ...base,
+          date: todayIso(),
+          amount: '',
+          currency: 'NGN',
+          category: 'Other',
+          raw_ocr_text: '',
+          error: err.message || 'Could not read this image.',
+        };
+      }
+      RowStore.put(record);
+      newRows.push(record);
+      setRows([...newRows]);
     }
+
+    setExtractStatus(`Extracted ${newRows.length} receipt(s) — review and confirm below.`);
+    setExtracting(false);
   }
 
   function handleFieldChange(id, field, value) {
@@ -253,9 +269,10 @@ export default function Expenses() {
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Or upload receipt photos</h2>
         <p className="muted">
-          Select one or more receipt images. Each is sent for OCR extraction only — they are
-          never saved server-side; only the fields you confirm below get written to the database.
-          Unsaved images and edits stick around in this browser if you reload the page.
+          Select one or more receipt images. OCR runs entirely in your browser — the images
+          are never uploaded anywhere; only the fields you confirm below get sent to the
+          server, as a new transaction. Unsaved images and edits stick around in this browser
+          if you reload the page.
         </p>
         <input type="file" ref={fileInputRef} accept="image/*" multiple />
         <button type="button" onClick={handleExtract} disabled={extracting}>
@@ -274,7 +291,7 @@ export default function Expenses() {
         />
       ))}
 
-      {rows.length > 0 && (
+      {(rows.length > 0 || saveAllStatus.text) && (
         <div className="card">
           <button type="button" onClick={handleSaveAll} disabled={savingAll}>
             Save all transactions
