@@ -8,6 +8,7 @@ import Expenses from './pages/Expenses';
 import Home from './pages/Home';
 import Income from './pages/Income';
 import Login from './pages/Login';
+import TransactionDetail from './pages/TransactionDetail';
 
 export default function App() {
   return (
@@ -46,6 +47,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Income />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/transactions/:id"
+              element={
+                <ProtectedRoute>
+                  <TransactionDetail />
                 </ProtectedRoute>
               }
             />

@@ -144,6 +144,8 @@ th, td {
   font-size: 0.9rem;
 }
 th { color: var(--muted); font-weight: 600; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover td { background: var(--bg); }
 input, select, button {
   font: inherit;
   padding: 0.45rem 0.6rem;
@@ -161,6 +163,7 @@ button {
 button:hover { opacity: 0.9; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button.danger { background: transparent; color: #ef4444; border: 1px solid #ef4444; }
 .muted { color: var(--muted); font-size: 0.85rem; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
 .stat { font-size: 1.6rem; font-weight: 700; }

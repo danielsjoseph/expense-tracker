@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/client';
 
 const PAGE_SIZE = 10;
@@ -15,6 +16,7 @@ function formatAmount(value) {
  * page hides it since every row is already that one category.
  */
 export default function TransactionsTable({ filters, showCategory = true }) {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
   const [data, setData] = useState({ results: [], count: 0, next: null, previous: null });
@@ -69,7 +71,11 @@ export default function TransactionsTable({ filters, showCategory = true }) {
             </tr>
           )}
           {data.results.map((txn) => (
-            <tr key={txn.id}>
+            <tr
+              key={txn.id}
+              className="clickable-row"
+              onClick={() => navigate(`/transactions/${txn.id}`)}
+            >
               <td>{txn.date}</td>
               {showCategory && <td>{txn.category || '—'}</td>}
               <td>
