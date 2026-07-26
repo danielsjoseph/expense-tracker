@@ -26,6 +26,7 @@ body {
   color: var(--text);
 }
 header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -41,6 +42,88 @@ header a {
 header a:hover { color: var(--accent); }
 header .brand-link { text-decoration: none; color: inherit; margin-left: 0; }
 header .brand { font-weight: 600; margin-left: 0; font-size: 1.05rem; }
+
+.nav-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  margin-left: 2rem;
+}
+.nav-links, .nav-user { display: flex; align-items: center; }
+
+/* Hamburger: three bars that morph into an X. Hidden on desktop. */
+.hamburger {
+  display: none;
+  position: relative;
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.hamburger span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--text);
+  border-radius: 2px;
+  transition: transform 0.25s ease, opacity 0.2s ease, top 0.25s ease;
+}
+.hamburger span:nth-child(1) { top: 0; }
+.hamburger span:nth-child(2) { top: 10px; }
+.hamburger span:nth-child(3) { top: 20px; }
+.hamburger.open span:nth-child(1) { top: 10px; transform: rotate(45deg); }
+.hamburger.open span:nth-child(2) { opacity: 0; }
+.hamburger.open span:nth-child(3) { top: 10px; transform: rotate(-45deg); }
+
+@media (max-width: 720px) {
+  .hamburger { display: block; }
+
+  .nav-panel {
+    margin-left: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+    padding: 1rem 1.5rem;
+
+    max-height: 0;
+    overflow: hidden;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  }
+  .nav-panel.open {
+    max-height: 320px;
+    opacity: 1;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .nav-links, .nav-user {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .nav-links a, .nav-user a, .nav-user span {
+    margin-left: 0;
+  }
+  .nav-user {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+}
 main {
   max-width: 960px;
   margin: 0 auto;

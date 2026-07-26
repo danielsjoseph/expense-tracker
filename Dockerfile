@@ -28,4 +28,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN python manage.py collectstatic --noinput
 
-CMD python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+# --timeout 120: OCR-extracting a batch of receipts is CPU-heavy and can
+# take longer than gunicorn's 30s default, which was killing the worker
+# mid-request on a batch of several images (surfaced to users as "Could not
+# reach the server"). Images are now downscaled before OCR too (see
+# receipts/ocr/preprocessing.py) — this timeout is a safety margin on top of
+# that, not a substitute for it.
+CMD python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --timeout 120

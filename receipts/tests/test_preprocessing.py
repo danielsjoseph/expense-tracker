@@ -31,3 +31,13 @@ class PreprocessForOcrTests(SimpleTestCase):
         self.assertEqual(result.dtype, np.uint8)
         unique_values = set(np.unique(result).tolist())
         self.assertTrue(unique_values.issubset({0, 255}))
+
+    def test_large_image_is_downscaled(self):
+        # A 4000px-wide photo (typical phone camera output) shouldn't reach
+        # Tesseract at full resolution — see _MAX_DIMENSION in preprocessing.py.
+        result = preprocess_for_ocr(_sample_image_bytes(size=(4000, 3000)))
+        self.assertEqual(max(result.shape), 1800)
+
+    def test_small_image_is_not_upscaled(self):
+        result = preprocess_for_ocr(_sample_image_bytes(size=(200, 100)))
+        self.assertEqual(result.shape[:2], (100, 200))
