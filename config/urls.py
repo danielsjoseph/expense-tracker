@@ -13,7 +13,6 @@ from .spa import spa_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('receipts.urls')),
     path('api/', include('transactions.urls')),
     path('api/', include('dashboard.api_urls')),
     path('api/auth/', include('accounts.api_urls')),

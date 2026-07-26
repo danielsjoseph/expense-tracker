@@ -7,7 +7,15 @@ import { parseDateFragment } from './dateParser';
 
 const CURRENCY_SYMBOLS = { $: 'USD', '€': 'EUR', '£': 'GBP', '₦': 'NGN' };
 
-const TOTAL_KEYWORDS_PRIORITY = ['grand total', 'total due', 'amount due', 'balance due', 'total', 'amount'];
+const TOTAL_KEYWORDS_PRIORITY = [
+  'grand total', 'total due', 'amount due', 'balance due', 'total', 'amount',
+  // Bank transfer/payment confirmations ("You have successfully transferred
+  // NGN50,000 to ...") often have no "total"/"amount" label at all, which
+  // used to send extraction straight to the ambiguous whole-page fallback
+  // below — where a longer account/reference number could outweigh the
+  // real amount. Catching this phrasing here finds the right number first.
+  'transferred',
+];
 const EXCLUDE_TOTAL_LINE_KEYWORDS = ['subtotal', 'sub total', 'sub-total'];
 
 const AMOUNT_SOURCE = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:[.,]\d{1,2})?`;
@@ -121,6 +129,10 @@ function extractTotalAmount(lines) {
 function looksLikeMoney(raw) {
   const cleaned = raw.replace(/\s/g, '');
   if (cleaned.includes('.')) return true;
+  // Thousands-grouped, e.g. "50,000" — nobody formats a phone/account/
+  // reference number with comma grouping, so this is a reliable money
+  // signal even without a decimal fraction.
+  if (/^\d{1,3}(,\d{3})+$/.test(cleaned)) return true;
   const parts = cleaned.split(',');
   return parts.length === 2 && parts[1].length === 2;
 }

@@ -3,8 +3,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from receipts.ocr.categorize import CATEGORIES
-
+from .choices import CATEGORIES
 from .models import MonthlyIncome, Transaction
 
 DEMO_TRANSACTION_COUNT = 20

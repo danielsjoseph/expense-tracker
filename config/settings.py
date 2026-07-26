@@ -71,7 +71,6 @@ INSTALLED_APPS = [
     'anymail',
     'accounts',
     'transactions',
-    'receipts',
     'dashboard',
 ]
 
@@ -211,12 +210,3 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
 if RESEND_API_KEY:
     EMAIL_BACKEND = 'anymail.backends.resend.EmailBackend'
     ANYMAIL = {'RESEND_API_KEY': RESEND_API_KEY}
-
-# Receipt images are never persisted; keep in-memory upload handling tight
-# so small photos never spill to Django's own temp-file handler either.
-FILE_UPLOAD_HANDLERS = [
-    'django.core.files.uploadhandler.MemoryFileUploadHandler',
-    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
-]
-DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB

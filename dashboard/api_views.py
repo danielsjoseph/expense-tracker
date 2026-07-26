@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from receipts.ocr.categorize import CATEGORIES
+from transactions.choices import CATEGORIES
 from transactions.models import Transaction
 
 from .views import (

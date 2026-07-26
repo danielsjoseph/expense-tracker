@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 import ReceiptRowCard from '../components/ReceiptRowCard';
 import { CATEGORIES, CURRENCIES } from '../lib/constants';
-import { extractTransactionFields, terminateOcrWorker } from '../lib/ocr/pipeline';
+import { extractTransactionFieldsBatch, terminateOcrWorker } from '../lib/ocr/pipeline';
 import { RowStore } from '../lib/rowStore';
 
 function todayIso() {
@@ -88,50 +88,53 @@ export default function Expenses() {
     setExtracting(true);
     // A fresh extraction replaces whatever unsaved batch was showing.
     await RowStore.clear();
-    const newRows = [];
-    setRows([]);
-    setRowStatuses({});
 
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      setExtractStatus(`Extracting receipt ${index + 1} of ${files.length} (running in your browser)...`);
+    // Show every row immediately (as "Reading...") rather than one at a
+    // time, since a worker pool now processes several files concurrently —
+    // results arrive in whatever order finishes first, not file order.
+    const placeholders = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+      filename: file.name || `Receipt ${index + 1}`,
+      date: todayIso(),
+      amount: '',
+      currency: 'NGN',
+      category: 'Other',
+      raw_ocr_text: '',
+      error: '',
+      imageBlob: file,
+    }));
+    setRows(placeholders);
+    setRowStatuses(
+      Object.fromEntries(placeholders.map((r) => [r.id, { text: 'Reading...', tone: '' }]))
+    );
+    setExtractStatus(`Extracting ${files.length} receipt(s) (running in your browser)...`);
 
-      const base = {
-        id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-        filename: file.name || `Receipt ${index + 1}`,
-        imageBlob: file,
-      };
-      let record;
-      try {
-        // Runs entirely client-side — the image itself is never uploaded.
-        const result = await extractTransactionFields(file);
-        record = {
-          ...base,
-          date: result.date || todayIso(),
-          amount: result.amount ?? '',
-          currency: 'NGN',
-          category: result.category || 'Other',
-          raw_ocr_text: result.raw_ocr_text || '',
-          error: '',
-        };
-      } catch (err) {
-        // A single unreadable image shouldn't sink the rest of the batch.
-        record = {
-          ...base,
-          date: todayIso(),
-          amount: '',
-          currency: 'NGN',
-          category: 'Other',
-          raw_ocr_text: '',
-          error: err.message || 'Could not read this image.',
-        };
-      }
-      RowStore.put(record);
-      newRows.push(record);
-      setRows([...newRows]);
-    }
+    let completed = 0;
+    await extractTransactionFieldsBatch(files, (index, result, err) => {
+      completed += 1;
+      const id = placeholders[index].id;
 
-    setExtractStatus(`Extracted ${newRows.length} receipt(s) — review and confirm below.`);
+      setRows((prev) => {
+        const next = [...prev];
+        const updated = err
+          ? { ...next[index], error: err.message || 'Could not read this image.' }
+          : {
+              ...next[index],
+              date: result.date || todayIso(),
+              amount: result.amount ?? '',
+              currency: 'NGN',
+              category: result.category || 'Other',
+              raw_ocr_text: result.raw_ocr_text || '',
+            };
+        next[index] = updated;
+        RowStore.put(updated);
+        return next;
+      });
+      setRowStatuses((prev) => ({ ...prev, [id]: { text: '', tone: '' } }));
+      setExtractStatus(`Extracted ${completed} of ${files.length} receipt(s)...`);
+    });
+
+    setExtractStatus(`Extracted ${files.length} receipt(s) — review and confirm below.`);
     setExtracting(false);
   }
 

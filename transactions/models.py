@@ -1,8 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from receipts.ocr.categorize import CATEGORIES
-from receipts.ocr.parser import CURRENCIES
+from .choices import CATEGORIES, CURRENCIES
 
 CATEGORY_CHOICES = [(category, category) for category in CATEGORIES]
 CURRENCY_CHOICES = [(currency, currency) for currency in CURRENCIES]

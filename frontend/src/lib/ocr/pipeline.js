@@ -13,6 +13,12 @@ import { parseReceiptText } from './parser';
 // backend's (now-unused for this flow) OCR pipeline used.
 const MAX_DIMENSION = 1800;
 
+// Each pool worker is its own WASM instance (own copy of the language
+// model), so this trades memory for parallelism. 4 is a reasonable cap for
+// a batch-of-receipts UI; hardwareConcurrency and the actual file count
+// both bound it lower when there's less to gain from more workers.
+const MAX_WORKERS = 4;
+
 async function fileToPreprocessedCanvas(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
@@ -40,31 +46,42 @@ async function fileToPreprocessedCanvas(file) {
   return canvas;
 }
 
-let workerPromise = null;
-function getWorker() {
-  if (!workerPromise) {
-    workerPromise = createWorker('eng');
-  }
-  return workerPromise;
+function poolSize(fileCount) {
+  const hardwareCap = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+  return Math.max(1, Math.min(MAX_WORKERS, hardwareCap, fileCount));
 }
 
-/** Releases the Tesseract worker (and its WASM memory). Safe to call even
- * if a worker was never created. */
+let workerPoolPromise = null;
+let workerPoolSize = 0;
+
+// Grows the pool to the requested size (never shrinks an already-running
+// pool — a bigger batch just gets more workers than a smaller one did).
+function getWorkerPool(size) {
+  if (workerPoolPromise && workerPoolSize >= size) return workerPoolPromise;
+
+  const previous = workerPoolPromise;
+  const additional = size - workerPoolSize;
+  workerPoolSize = size;
+  workerPoolPromise = (async () => {
+    const existing = previous ? await previous : [];
+    const created = await Promise.all(Array.from({ length: additional }, () => createWorker('eng')));
+    return [...existing, ...created];
+  })();
+  return workerPoolPromise;
+}
+
+/** Releases all pooled Tesseract workers (and their WASM memory). Safe to
+ * call even if a pool was never created. */
 export async function terminateOcrWorker() {
-  if (!workerPromise) return;
-  const worker = await workerPromise;
-  workerPromise = null;
-  await worker.terminate();
+  if (!workerPoolPromise) return;
+  const pool = await workerPoolPromise;
+  workerPoolPromise = null;
+  workerPoolSize = 0;
+  await Promise.all(pool.map((worker) => worker.terminate()));
 }
 
-/** Runs the full client-side OCR pipeline on one File and returns the same
- * field shape the old server-side /api/extract/ endpoint returned. Throws
- * on genuinely unreadable images, mirroring the backend's per-image error
- * isolation (callers catch this per-file so one bad image doesn't sink a
- * whole batch). */
-export async function extractTransactionFields(file) {
+async function runOcr(worker, file) {
   const canvas = await fileToPreprocessedCanvas(file);
-  const worker = await getWorker();
   const {
     data: { text },
   } = await worker.recognize(canvas);
@@ -78,4 +95,38 @@ export async function extractTransactionFields(file) {
     line_items: lineItems,
     raw_ocr_text: text,
   };
+}
+
+/** Runs the full client-side OCR pipeline on one File and returns the same
+ * field shape the old server-side /api/extract/ endpoint returned. Throws
+ * on genuinely unreadable images. */
+export async function extractTransactionFields(file) {
+  const [worker] = await getWorkerPool(1);
+  return runOcr(worker, file);
+}
+
+/** Runs OCR across a batch of files using a small worker pool, so several
+ * receipts recognize concurrently instead of one at a time. Results are
+ * *not* returned in file order — `onFileDone(index, result, error)` fires
+ * as each one finishes, so the caller can show them as they arrive; a
+ * single unreadable image (passed back as `error`) doesn't stop the rest
+ * of the batch. */
+export async function extractTransactionFieldsBatch(files, onFileDone) {
+  const pool = await getWorkerPool(poolSize(files.length));
+  const queue = files.map((file, index) => ({ file, index }));
+
+  async function drain(worker) {
+    while (queue.length) {
+      const { file, index } = queue.shift();
+      try {
+        const result = await runOcr(worker, file);
+        onFileDone(index, result, null);
+      } catch (err) {
+        onFileDone(index, null, err);
+      }
+    }
+  }
+
+  // Only as many workers as there are files actually run.
+  await Promise.all(pool.slice(0, files.length).map((worker) => drain(worker)));
 }
