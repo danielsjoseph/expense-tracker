@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { CATEGORIES, CURRENCIES } from '../lib/constants';
 
 export default function TransactionDetail() {
@@ -16,6 +17,7 @@ export default function TransactionDetail() {
   const [status, setStatus] = useState({ text: '', tone: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,8 +63,8 @@ export default function TransactionDetail() {
     }
   }
 
-  async function handleDelete() {
-    if (!window.confirm('Delete this transaction? This cannot be undone.')) return;
+  async function confirmDelete() {
+    setConfirmOpen(false);
     setDeleting(true);
     try {
       const res = await apiFetch(`/api/transactions/${id}/`, { method: 'DELETE' });
@@ -153,7 +155,7 @@ export default function TransactionDetail() {
         <button type="submit" disabled={saving}>
           Save changes
         </button>{' '}
-        <button type="button" className="danger" onClick={handleDelete} disabled={deleting}>
+        <button type="button" className="danger" onClick={() => setConfirmOpen(true)} disabled={deleting}>
           Delete transaction
         </button>{' '}
         <span
@@ -171,6 +173,16 @@ export default function TransactionDetail() {
           </pre>
         </details>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete this transaction?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }
