@@ -16,7 +16,18 @@ export default function DailyLineChart({ labels, totals }) {
     ],
   };
 
-  const options = { plugins: { legend: { display: false } } };
+  const options = {
+    // Without this, Chart.js keeps the same width:height ratio as desktop —
+    // on a narrow mobile card that meant the chart's height shrank right
+    // along with its width, making it look squashed. A fixed-height wrapper
+    // plus this keeps the height stable regardless of screen width.
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+  };
 
-  return <Line data={data} options={options} height={80} />;
+  return (
+    <div style={{ height: 240 }}>
+      <Line data={data} options={options} />
+    </div>
+  );
 }
