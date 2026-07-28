@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiFetch } from '../api/client';
 import CategoryDoughnutChart from '../components/CategoryDoughnutChart';
 import DailyLineChart from '../components/DailyLineChart';
 import IncomePieChart from '../components/IncomePieChart';
 import TransactionsTable from '../components/TransactionsTable';
+import { buildDashboardSummary } from '../lib/aggregations';
+import { exportTransactionsToCsv } from '../lib/csvExport';
+import { todayIso } from '../lib/date';
+import { getMonthlyIncome, listExtraIncome, listTransactions } from '../lib/db';
 
 function formatAmount(value) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,8 +20,11 @@ export default function Dashboard() {
   const category = searchParams.get('category') || '';
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
+  const filters = { category, date_from: dateFrom, date_to: dateTo };
 
-  const [summary, setSummary] = useState(null);
+  const [transactions, setTransactions] = useState(null);
+  const [baseIncome, setBaseIncome] = useState(0);
+  const [extraIncomeTotal, setExtraIncomeTotal] = useState(0);
   const [formCategory, setFormCategory] = useState(category);
   const [formDateFrom, setFormDateFrom] = useState(dateFrom);
   const [formDateTo, setFormDateTo] = useState(dateTo);
@@ -30,21 +36,24 @@ export default function Dashboard() {
   }, [category, dateFrom, dateTo]);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (category) params.set('category', category);
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-
     let cancelled = false;
-    apiFetch(`/api/dashboard/summary/?${params.toString()}`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (!cancelled) setSummary(json);
-      });
+    async function load() {
+      const today = todayIso();
+      const [txns, income, extras] = await Promise.all([
+        listTransactions(),
+        getMonthlyIncome(today),
+        listExtraIncome(today),
+      ]);
+      if (cancelled) return;
+      setTransactions(txns);
+      setBaseIncome(income.amount);
+      setExtraIncomeTotal(extras.reduce((sum, e) => sum + Number(e.amount), 0));
+    }
+    load();
     return () => {
       cancelled = true;
     };
-  }, [category, dateFrom, dateTo]);
+  }, []);
 
   function applyFilters(event) {
     event.preventDefault();
@@ -74,16 +83,9 @@ export default function Dashboard() {
     navigate(`/dashboard/category/${encodeURIComponent(label)}${qs ? `?${qs}` : ''}`);
   }
 
-  const exportUrl = (() => {
-    const params = new URLSearchParams();
-    if (category) params.set('category', category);
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-    const qs = params.toString();
-    return `/export/csv/${qs ? `?${qs}` : ''}`;
-  })();
+  if (!transactions) return null;
 
-  if (!summary) return null;
+  const summary = buildDashboardSummary(transactions, { baseIncome, extraIncome: extraIncomeTotal, filters });
 
   return (
     <>
@@ -152,7 +154,13 @@ export default function Dashboard() {
             {!!category && (
               <p className="muted" style={{ textAlign: 'center', marginTop: '0.75rem' }}>
                 Filtered to <strong>{category}</strong> —{' '}
-                <a href="#" onClick={(e) => { e.preventDefault(); clearCategoryOnly(); }}>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    clearCategoryOnly();
+                  }}
+                >
                   clear
                 </a>
               </p>
@@ -179,14 +187,12 @@ export default function Dashboard() {
           <button type="button" className="secondary" onClick={clearFilters}>
             Clear
           </button>
-          <a href={exportUrl}>
-            <button type="button" className="secondary">
-              Export CSV
-            </button>
-          </a>
+          <button type="button" className="secondary" onClick={() => exportTransactionsToCsv(transactions, filters)}>
+            Export CSV
+          </button>
         </form>
 
-        <TransactionsTable filters={{ category, date_from: dateFrom, date_to: dateTo }} />
+        <TransactionsTable transactions={transactions} filters={filters} />
       </div>
     </>
   );

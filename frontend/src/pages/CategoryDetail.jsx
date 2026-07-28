@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { apiFetch } from '../api/client';
 import CategoryDoughnutChart from '../components/CategoryDoughnutChart';
 import TransactionsTable from '../components/TransactionsTable';
+import { buildCategorySummary } from '../lib/aggregations';
+import { CATEGORIES } from '../lib/constants';
+import { listTransactions } from '../lib/db';
 
 function formatAmount(value) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -15,10 +17,12 @@ export default function CategoryDetail() {
 
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
+  const filters = { date_from: dateFrom, date_to: dateTo };
   const [formDateFrom, setFormDateFrom] = useState(dateFrom);
   const [formDateTo, setFormDateTo] = useState(dateTo);
-  const [summary, setSummary] = useState(null);
-  const [notFound, setNotFound] = useState(false);
+  const [transactions, setTransactions] = useState(null);
+
+  const notFound = !CATEGORIES.includes(category);
 
   useEffect(() => {
     setFormDateFrom(dateFrom);
@@ -26,27 +30,15 @@ export default function CategoryDetail() {
   }, [dateFrom, dateTo]);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-
+    if (notFound) return undefined;
     let cancelled = false;
-    setNotFound(false);
-    apiFetch(`/api/dashboard/category/${encodeURIComponent(category)}/summary/?${params.toString()}`)
-      .then((res) => {
-        if (res.status === 404) {
-          if (!cancelled) setNotFound(true);
-          return null;
-        }
-        return res.json();
-      })
-      .then((json) => {
-        if (!cancelled && json) setSummary(json);
-      });
+    listTransactions().then((txns) => {
+      if (!cancelled) setTransactions(txns);
+    });
     return () => {
       cancelled = true;
     };
-  }, [category, dateFrom, dateTo]);
+  }, [category, notFound]);
 
   function applyFilters(event) {
     event.preventDefault();
@@ -81,7 +73,9 @@ export default function CategoryDetail() {
     );
   }
 
-  if (!summary) return null;
+  if (!transactions) return null;
+
+  const summary = buildCategorySummary(transactions, category, filters);
 
   return (
     <>
@@ -126,7 +120,7 @@ export default function CategoryDetail() {
           </button>
         </form>
 
-        <TransactionsTable filters={{ category, date_from: dateFrom, date_to: dateTo }} showCategory={false} />
+        <TransactionsTable transactions={transactions} filters={{ category, ...filters }} showCategory={false} />
       </div>
     </>
   );

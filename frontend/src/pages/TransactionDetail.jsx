@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { apiFetch } from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { CATEGORIES, CURRENCIES } from '../lib/constants';
+import { deleteTransaction, getTransaction, updateTransaction } from '../lib/db';
 
 export default function TransactionDetail() {
   const { id } = useParams();
@@ -21,13 +21,12 @@ export default function TransactionDetail() {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch(`/api/transactions/${id}/`).then(async (res) => {
+    getTransaction(id).then((data) => {
       if (cancelled) return;
-      if (res.status === 404) {
+      if (!data) {
         setNotFound(true);
         return;
       }
-      const data = await res.json();
       setTransaction(data);
       setDate(data.date);
       setAmount(data.amount);
@@ -44,20 +43,11 @@ export default function TransactionDetail() {
     setSaving(true);
     setStatus({ text: 'Saving...', tone: '' });
     try {
-      const res = await apiFetch(`/api/transactions/${id}/`, {
-        method: 'PATCH',
-        body: { date, amount, currency, category },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTransaction(data);
-        setStatus({ text: 'Saved.', tone: 'success' });
-      } else {
-        const data = await res.json();
-        setStatus({ text: 'Could not save: ' + JSON.stringify(data), tone: 'error' });
-      }
+      const data = await updateTransaction(id, { date, amount, currency, category });
+      setTransaction(data);
+      setStatus({ text: 'Saved.', tone: 'success' });
     } catch {
-      setStatus({ text: 'Could not reach the server.', tone: 'error' });
+      setStatus({ text: 'Could not save this transaction.', tone: 'error' });
     } finally {
       setSaving(false);
     }
@@ -67,15 +57,10 @@ export default function TransactionDetail() {
     setConfirmOpen(false);
     setDeleting(true);
     try {
-      const res = await apiFetch(`/api/transactions/${id}/`, { method: 'DELETE' });
-      if (res.ok) {
-        navigate('/dashboard');
-      } else {
-        setStatus({ text: 'Could not delete this transaction.', tone: 'error' });
-        setDeleting(false);
-      }
+      await deleteTransaction(id);
+      navigate('/dashboard');
     } catch {
-      setStatus({ text: 'Could not reach the server.', tone: 'error' });
+      setStatus({ text: 'Could not delete this transaction.', tone: 'error' });
       setDeleting(false);
     }
   }

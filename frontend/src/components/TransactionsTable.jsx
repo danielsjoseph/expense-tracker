@@ -1,60 +1,44 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '../api/client';
+import { filterTransactions } from '../lib/aggregations';
 
 const PAGE_SIZE = 10;
-const ALL_PAGE_SIZE = 10000;
 
 function formatAmount(value) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
- * Fetches /api/transactions/ with the given filters, plus its own
- * pagination state (10/page, with a "see all" toggle). showCategory
- * controls whether the category column is shown — the category detail
- * page hides it since every row is already that one category.
+ * Renders a filtered, paginated (10/page, with a "see all" toggle) slice
+ * of an in-memory transactions array — everything lives in the browser
+ * now, so there's no server round-trip or page-size query param anymore.
+ * showCategory controls whether the category column is shown — the
+ * category detail page hides it since every row is already that category.
  */
-export default function TransactionsTable({ filters, showCategory = true }) {
+export default function TransactionsTable({ transactions, filters, showCategory = true }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
-  const [data, setData] = useState({ results: [], count: 0, next: null, previous: null });
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setPage(1);
     setShowAll(false);
   }, [filters.category, filters.date_from, filters.date_to]);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (filters.category) params.set('category', filters.category);
-    if (filters.date_from) params.set('date_from', filters.date_from);
-    if (filters.date_to) params.set('date_to', filters.date_to);
-    params.set('page_size', showAll ? ALL_PAGE_SIZE : PAGE_SIZE);
-    if (!showAll) params.set('page', page);
+  const filtered = useMemo(
+    () =>
+      [...filterTransactions(transactions, filters)].sort((a, b) =>
+        a.date === b.date ? (a.created_at < b.created_at ? 1 : -1) : a.date < b.date ? 1 : -1
+      ),
+    [transactions, filters.category, filters.date_from, filters.date_to]
+  );
 
-    let cancelled = false;
-    setLoading(true);
-    apiFetch(`/api/transactions/?${params.toString()}`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (!cancelled) setData(json);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filters.category, filters.date_from, filters.date_to, page, showAll]);
-
-  const totalPages = Math.ceil(data.count / PAGE_SIZE) || 1;
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  const pageItems = showAll ? filtered : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
-      <table className="transactions-table">
+      <table>
         <thead>
           <tr>
             <th>Date</th>
@@ -63,14 +47,14 @@ export default function TransactionsTable({ filters, showCategory = true }) {
           </tr>
         </thead>
         <tbody>
-          {!loading && data.results.length === 0 && (
+          {pageItems.length === 0 && (
             <tr>
               <td colSpan={showCategory ? 3 : 2} className="muted">
                 No transactions in this range.
               </td>
             </tr>
           )}
-          {data.results.map((txn) => (
+          {pageItems.map((txn) => (
             <tr
               key={txn.id}
               className="clickable-row"
@@ -98,7 +82,7 @@ export default function TransactionsTable({ filters, showCategory = true }) {
       >
         {showAll ? (
           <>
-            <span className="muted">Showing all {data.count} transaction(s)</span>
+            <span className="muted">Showing all {filtered.length} transaction(s)</span>
             <button type="button" className="secondary" onClick={() => setShowAll(false)}>
               Paginate (10 per page)
             </button>
@@ -106,16 +90,16 @@ export default function TransactionsTable({ filters, showCategory = true }) {
         ) : (
           <>
             <div>
-              {!!data.previous && (
+              {page > 1 && (
                 <button type="button" className="secondary" onClick={() => setPage((p) => p - 1)}>
                   Previous
                 </button>
               )}
-              {!!data.next && (
+              {page < totalPages && (
                 <button
                   type="button"
                   className="secondary"
-                  style={{ marginLeft: data.previous ? '0.5rem' : 0 }}
+                  style={{ marginLeft: page > 1 ? '0.5rem' : 0 }}
                   onClick={() => setPage((p) => p + 1)}
                 >
                   Next
@@ -123,7 +107,7 @@ export default function TransactionsTable({ filters, showCategory = true }) {
               )}
             </div>
             <span className="muted">
-              Page {page} of {totalPages} ({data.count} total)
+              Page {page} of {totalPages} ({filtered.length} total)
             </span>
             <button type="button" className="secondary" onClick={() => setShowAll(true)}>
               See all transactions

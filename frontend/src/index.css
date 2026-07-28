@@ -46,11 +46,9 @@ header .brand { font-weight: 600; margin-left: 0; font-size: 1.05rem; }
 .nav-panel {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex: 1;
   margin-left: 2rem;
 }
-.nav-links, .nav-user { display: flex; align-items: center; }
+.nav-links { display: flex; align-items: center; }
 
 /* Hamburger: three bars that morph into an X. Hidden on desktop. */
 .hamburger {
@@ -111,17 +109,13 @@ header .brand { font-weight: 600; margin-left: 0; font-size: 1.05rem; }
     padding-bottom: 1rem;
   }
 
-  .nav-links, .nav-user {
+  .nav-links {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.5rem;
   }
-  .nav-links a, .nav-user a, .nav-user span {
+  .nav-links a {
     margin-left: 0;
-  }
-  .nav-user {
-    border-top: 1px solid var(--border);
-    padding-top: 0.75rem;
   }
 }
 main {

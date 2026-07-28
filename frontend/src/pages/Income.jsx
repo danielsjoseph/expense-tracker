@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { apiFetch } from '../api/client';
+import { todayIso } from '../lib/date';
+import { createExtraIncome, deleteExtraIncome, getMonthlyIncome, listExtraIncome, setMonthlyIncome } from '../lib/db';
 import { CURRENCIES } from '../lib/constants';
 
 export default function Income() {
@@ -17,16 +18,12 @@ export default function Income() {
   const [extraStatus, setExtraStatus] = useState('');
 
   useEffect(() => {
-    apiFetch('/api/income/current/')
-      .then((res) => res.json())
-      .then((data) => setSalary(data.amount));
+    getMonthlyIncome(todayIso()).then((data) => setSalary(data.amount));
     loadExtraIncome();
   }, []);
 
   function loadExtraIncome() {
-    apiFetch('/api/income/extra/')
-      .then((res) => res.json())
-      .then((data) => setExtraEntries(data.results || data));
+    listExtraIncome(todayIso()).then((entries) => setExtraEntries(entries));
   }
 
   async function handleSaveSalary(event) {
@@ -34,16 +31,11 @@ export default function Income() {
     setSavingSalary(true);
     setSalaryStatus('Saving...');
     try {
-      const res = await apiFetch('/api/income/current/', { method: 'POST', body: { amount: salary } });
-      if (res.ok) {
-        setSalaryStatus('Saved — returning to dashboard...');
-        navigate('/dashboard');
-      } else {
-        setSalaryStatus('Could not save salary.');
-        setSavingSalary(false);
-      }
+      await setMonthlyIncome(todayIso(), salary);
+      setSalaryStatus('Saved — returning to dashboard...');
+      navigate('/dashboard');
     } catch {
-      setSalaryStatus('Could not reach the server.');
+      setSalaryStatus('Could not save salary.');
       setSavingSalary(false);
     }
   }
@@ -52,27 +44,19 @@ export default function Income() {
     event.preventDefault();
     setExtraStatus('Adding...');
     try {
-      const res = await apiFetch('/api/income/extra/', {
-        method: 'POST',
-        body: { amount: extraAmount, currency: extraCurrency, description: extraDescription },
-      });
-      if (res.ok) {
-        setExtraStatus('Added.');
-        setExtraAmount('');
-        setExtraDescription('');
-        loadExtraIncome();
-      } else {
-        const data = await res.json();
-        setExtraStatus('Could not add: ' + JSON.stringify(data));
-      }
-    } catch {
-      setExtraStatus('Could not reach the server.');
+      await createExtraIncome(todayIso(), { amount: extraAmount, currency: extraCurrency, description: extraDescription });
+      setExtraStatus('Added.');
+      setExtraAmount('');
+      setExtraDescription('');
+      loadExtraIncome();
+    } catch (err) {
+      setExtraStatus('Could not add: ' + (err.message || 'unknown error'));
     }
   }
 
   async function handleDeleteExtra(id) {
     try {
-      await apiFetch(`/api/income/extra/${id}/`, { method: 'DELETE' });
+      await deleteExtraIncome(id);
       loadExtraIncome();
     } catch {
       // leave the row as-is if the delete failed

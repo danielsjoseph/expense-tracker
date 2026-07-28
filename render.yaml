@@ -1,7 +1,3 @@
-databases:
-  - name: expense-tracker-db
-    plan: free
-
 services:
   - type: web
     name: expense-tracker
@@ -12,11 +8,3 @@ services:
         generateValue: true
       - key: DJANGO_DEBUG
         value: "False"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: expense-tracker-db
-          property: connectionString
-      - key: RESEND_API_KEY
-        sync: false
-      - key: DEFAULT_FROM_EMAIL
-        sync: false

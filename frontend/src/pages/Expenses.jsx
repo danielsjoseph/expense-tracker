@@ -1,20 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch } from '../api/client';
 import ReceiptRowCard from '../components/ReceiptRowCard';
+import { todayIso } from '../lib/date';
+import { createTransaction } from '../lib/db';
 import { CATEGORIES, CURRENCIES } from '../lib/constants';
 import { extractTransactionFieldsBatch, terminateOcrWorker } from '../lib/ocr/pipeline';
 import { RowStore } from '../lib/rowStore';
-
-function todayIso() {
-  const d = new Date();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${month}-${day}`;
-}
-
-async function createTransaction(payload) {
-  return apiFetch('/api/transactions/', { method: 'POST', body: payload });
-}
 
 export default function Expenses() {
   // Manual entry form
@@ -62,19 +52,14 @@ export default function Expenses() {
     setManualStatus({ text: 'Saving...', tone: '' });
     const payload = { date: manualDate, amount: manualAmount, currency: manualCurrency, category: manualCategory };
     try {
-      const res = await createTransaction(payload);
-      if (res.ok) {
-        flashSuccess(setManualStatus, 'Expense added successfully!');
-        setManualDate(todayIso());
-        setManualAmount('');
-        setManualCurrency('NGN');
-        setManualCategory(CATEGORIES[0]);
-      } else {
-        const data = await res.json();
-        setManualStatus({ text: 'Could not save: ' + JSON.stringify(data), tone: 'error' });
-      }
-    } catch {
-      setManualStatus({ text: 'Could not reach the server.', tone: 'error' });
+      await createTransaction(payload);
+      flashSuccess(setManualStatus, 'Expense added successfully!');
+      setManualDate(todayIso());
+      setManualAmount('');
+      setManualCurrency('NGN');
+      setManualCategory(CATEGORIES[0]);
+    } catch (err) {
+      setManualStatus({ text: 'Could not save: ' + (err.message || 'unknown error'), tone: 'error' });
     }
   }
 
@@ -170,21 +155,13 @@ export default function Expenses() {
       rows.map(async (row) => {
         const payload = { date: row.date, amount: row.amount, currency: row.currency, category: row.category };
         try {
-          const res = await createTransaction(payload);
-          if (res.ok) {
-            setRowStatuses((prev) => ({ ...prev, [row.id]: { text: 'Saved', tone: 'success' } }));
-            return { id: row.id, success: true };
-          }
-          const data = await res.json();
+          await createTransaction(payload);
+          setRowStatuses((prev) => ({ ...prev, [row.id]: { text: 'Saved', tone: 'success' } }));
+          return { id: row.id, success: true };
+        } catch (err) {
           setRowStatuses((prev) => ({
             ...prev,
-            [row.id]: { text: 'Failed: ' + JSON.stringify(data), tone: 'error' },
-          }));
-          return { id: row.id, success: false };
-        } catch {
-          setRowStatuses((prev) => ({
-            ...prev,
-            [row.id]: { text: 'Could not reach the server.', tone: 'error' },
+            [row.id]: { text: 'Failed: ' + (err.message || 'unknown error'), tone: 'error' },
           }));
           return { id: row.id, success: false };
         }
@@ -273,9 +250,9 @@ export default function Expenses() {
         <h2 style={{ marginTop: 0 }}>Or upload receipt photos</h2>
         <p className="muted">
           Select one or more receipt images. OCR runs entirely in your browser — the images
-          are never uploaded anywhere; only the fields you confirm below get sent to the
-          server, as a new transaction. Unsaved images and edits stick around in this browser
-          if you reload the page.
+          are never uploaded anywhere. Everything, including the confirmed transaction, is
+          stored only in this browser. Unsaved images and edits stick around here if you
+          reload the page.
         </p>
         <input type="file" ref={fileInputRef} accept="image/*" multiple />
         <button type="button" onClick={handleExtract} disabled={extracting}>
